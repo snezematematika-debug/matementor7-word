@@ -13,7 +13,6 @@ const getAiClient = () => {
   }
 
   // 2. Try import.meta.env (Vite Standard for Browser)
-  // We use try-catch and casting to avoid TS/runtime errors in different environments
   if (!apiKey) {
     try {
       // @ts-ignore
@@ -34,7 +33,31 @@ const getAiClient = () => {
   return new GoogleGenAI({ apiKey });
 };
 
-// Common instruction for Math Formatting - UPDATED TO FORBID LATEX IN JSON
+// --- Error Handling Helper ---
+const handleGeminiError = (error: any): never => {
+    console.error("Gemini API Error:", error);
+    const msg = error?.message || error?.toString() || "";
+
+    // Check for Quota Exceeded (429)
+    if (msg.includes("429") || msg.includes("RESOURCE_EXHAUSTED") || msg.includes("quota")) {
+        throw new Error("⚠️ Надминат е дневниот лимит за бесплатни барања (Error 429). Google Gemini (Free Tier) има ограничувања. Ве молиме почекајте или обидете се утре.");
+    }
+    
+    // Check for Overloaded (503)
+    if (msg.includes("503") || msg.includes("Overloaded")) {
+        throw new Error("⚠️ Серверот на Google е преоптоварен. Ве молиме обидете се повторно за неколку минути.");
+    }
+
+    // Check for Safety/Policy blocking
+    if (msg.includes("SAFETY") || msg.includes("BLOCKED")) {
+        throw new Error("⚠️ Содржината беше блокирана од безбедносните филтри на Google. Обидете се со поинаква формулација.");
+    }
+
+    // Default friendly message instead of raw JSON
+    throw new Error("Се појави техничка грешка при комуникација со AI. Ве молиме обидете се повторно.");
+};
+
+// Common instruction for Math Formatting
 const MATH_INSTRUCTION = `
 ВАЖНО ЗА ФОРМАТИРАЊЕ И JSON (СТРОГИ ПРАВИЛА):
 1. Враќај ЧИТЛИВ ТЕКСТ.
@@ -57,9 +80,7 @@ const parseJsonSafe = (text: string) => {
     if (!text) return null;
 
     // 0. Pre-clean common AI artifacts
-    // Replace "svg <svg" with "<svg" (case insensitive) to fix visualization glitch
     let clean = text.replace(/svg\s*<svg/gi, '<svg');
-    // Replace "svg ```" with "```" (case insensitive)
     clean = clean.replace(/svg\s*```/gi, '```');
 
     // 1. Remove Markdown code blocks if present
@@ -71,7 +92,7 @@ const parseJsonSafe = (text: string) => {
         console.warn("Standard JSON parse failed, attempting fallback...", e);
         try {
             // 2. Fallback: If AI still messed up backslashes despite instructions
-            const fixed = clean.replace(/\\/g, '/'); // Replace all backslashes with forward slashes as a last resort
+            const fixed = clean.replace(/\\/g, '/'); 
             return JSON.parse(fixed);
         } catch (e2) {
             console.error("Auto-fix failed. Original text:", text);
@@ -145,12 +166,12 @@ export const generateLessonContent = async (topic: string, grade: string, includ
     });
 
     const text = response.text;
-    if (!text) throw new Error("No response content");
+    if (!text) throw new Error("No response content from AI");
     
     return parseJsonSafe(text) as GeneratedLesson;
   } catch (error: any) {
-    console.error("Lesson generation error:", error);
-    throw new Error(error.message || "Failed to generate lesson");
+    handleGeminiError(error);
+    return null as any; // Unreachable due to throw
   }
 };
 
@@ -190,8 +211,8 @@ export const generateScenarioContent = async (topic: string): Promise<GeneratedS
       
       return parseJsonSafe(text) as GeneratedScenario;
     } catch (error: any) {
-      console.error("Scenario generation error:", error);
-      throw new Error(error.message || "Failed to generate scenario");
+      handleGeminiError(error);
+      return null as any;
     }
   };
 
@@ -279,8 +300,8 @@ export const generateQuizQuestions = async (topic: string, grade: string): Promi
     const result = parseJsonSafe(text);
     return result as {questions: QuizQuestion[], rubric: string};
   } catch (error: any) {
-    console.error("Quiz generation error:", error);
-    throw new Error(error.message || "Failed to generate quiz");
+    handleGeminiError(error);
+    return { questions: [], rubric: '' };
   }
 };
 
@@ -364,8 +385,8 @@ export const generateWorksheet = async (topic: string, type: 'STANDARD' | 'DIFFE
     return clean;
 
   } catch (error: any) {
-    console.error("Worksheet generation error:", error);
-    throw new Error(error.message || "Failed to generate worksheet");
+    handleGeminiError(error);
+    return "";
   }
 };
 
@@ -413,8 +434,8 @@ export const generateProject = async (topic: string): Promise<string> => {
       
       return text;
     } catch (error: any) {
-      console.error("Project generation error:", error);
-      throw new Error(error.message || "Failed to generate project");
+      handleGeminiError(error);
+      return "";
     }
 };
 
@@ -458,7 +479,7 @@ export const generateCanvasAnimation = async (description: string): Promise<stri
     code = code.replace(/```javascript/g, "").replace(/```js/g, "").replace(/```/g, "");
     return code;
   } catch (error: any) {
-    console.error("Canvas generation error:", error);
-    throw new Error(error.message || "Failed to generate animation");
+    handleGeminiError(error);
+    return "";
   }
 };
